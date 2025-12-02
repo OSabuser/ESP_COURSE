@@ -1,31 +1,50 @@
 {
     "version": 1,
     "editor": "wokwi",
+    "author": "Akimov Dmitry",
     "parts": [
-        {
-            "type": "board-esp32-c3-devkitm-1",
-            "id": "esp",
-            "top": 0.59,
-            "left": 0.67,
-            "attrs": {
-                "flashSize": "16"
-            }
-        }
-    ],
-    "connections": [
-        [
-            "esp:TX",
-            "$serialMonitor:RX",
-            "",
-            []
-        ],
-        [
-            "esp:RX",
-            "$serialMonitor:TX",
-            "",
-            []
-        ]
-    ],
+    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": -29.1, "left": -51.78, "attrs": {} },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 15.6,
+      "left": 148.2,
+      "attrs": { "color": "red", "flip": "1" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 51.95,
+      "left": 57.6,
+      "attrs": { "value": "500" }
+    },
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn1",
+      "top": -2.2,
+      "left": 67.2,
+      "attrs": { "color": "green", "xray": "1", "bounce": "0" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": -62.4,
+      "left": 37.85,
+      "rotate": 90,
+      "attrs": { "value": "1000" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "r1:1", "esp:7", "green", [ "v0" ] ],
+    [ "led1:A", "r1:2", "green", [ "v0" ] ],
+    [ "led1:C", "esp:GND.6", "black", [ "v0" ] ],
+    [ "btn1:2.l", "esp:GND.9", "black", [ "h0" ] ],
+    [ "r2:1", "esp:3V3.2", "red", [ "h0" ] ],
+    [ "r2:2", "btn1:1.r", "green", [ "h0" ] ],
+    [ "esp:9", "btn1:1.r", "green", [ "h65.92", "v-28.8" ] ]
+  ],
     "serialMonitor": {
         "display": "terminal",
         "convertEol": true
