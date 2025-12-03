@@ -13,14 +13,13 @@ use critical_section::Mutex;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 
-use esp_hal::time::Duration;
+use esp_hal::timer::PeriodicTimer;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::timer::{Error, OneShotTimer};
 use esp_hal::{Blocking, handler, main};
 use log::{error, info, warn};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
-static TIMER: Mutex<RefCell<Option<OneShotTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
+static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
 static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 
@@ -60,6 +59,7 @@ fn main() -> ! {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
     info!("Running at {:?} MHz", CpuClock::max());
 
     let mut io = Io::new(peripherals.IO_MUX);
@@ -81,12 +81,16 @@ fn main() -> ! {
 
     // Инициализация таймера
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let mut one_shot_timer = OneShotTimer::new(timg0.timer0);
+    let mut periodic_timer = PeriodicTimer::new(timg0.timer0);
 
-    one_shot_timer.set_interrupt_handler(gpt_irq_handler);
-    one_shot_timer.listen();
+    periodic_timer.set_interrupt_handler(gpt_irq_handler);
+    periodic_timer.listen();
 
-    critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(one_shot_timer));
+    // Запуск таймера
+    if let Err(e) = periodic_timer.start(esp_hal::time::Duration::from_millis(1000)) {
+        error!("Failed to start timer: {:?}", e);
+    }
+    critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(periodic_timer));
 
     let mut count = 0;
 
@@ -97,28 +101,13 @@ fn main() -> ! {
                 BTN_PRESSED.borrow(cs).set(false);
                 count += 1;
                 warn!("The button has been pressed {} times", count);
-
-                if let Err(e) = launch_one_shot_timer(1) {
-                    error!("Failed to launch one-shot timer: {:?}", e);
-                }
             }
 
             if PERIOD_ELAPSED.borrow(cs).get() {
                 PERIOD_ELAPSED.borrow(cs).set(false);
-                warn!("One shot period elapsed!");
+                warn!("timg0.timer0 period elapsed!");
                 led.toggle();
             }
         });
     }
-}
-
-fn launch_one_shot_timer(secs: u64) -> Result<(), Error> {
-    let result = critical_section::with(|cs| {
-        TIMER
-            .borrow_ref_mut(cs)
-            .as_mut()
-            .unwrap()
-            .schedule(Duration::from_secs(secs))
-    });
-    result
 }
