@@ -14,11 +14,11 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 
 use esp_hal::time::Duration;
+use esp_hal::timer::Timer;
 use esp_hal::timer::timg::Timer as TimgTimer;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::timer::{Error, OneShotTimer, Timer};
-use esp_hal::{Blocking, handler, main};
-use log::{error, info, warn};
+use esp_hal::{handler, main};
+use log::{info, warn};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<TimgTimer>>> = Mutex::new(RefCell::new(None));
@@ -92,10 +92,9 @@ fn main() -> ! {
     timer0.start();
     critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(timer0));
 
-    let mut count = 0;
-
     let timings = [900, 800, 700, 600, 500, 400];
     let mut timing_cnt = 0;
+    let mut count = 0;
 
     info!("Main thread has started...");
 
