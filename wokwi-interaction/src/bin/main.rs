@@ -12,14 +12,19 @@ use esp_backtrace as _;
 use critical_section::Mutex;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
-use esp_hal::{handler, main};
-use log::{info, warn};
+
+use esp_hal::timer::PeriodicTimer;
+use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{Blocking, handler, main};
+use log::{error, info, warn};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
+static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
+static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 
 #[handler]
-fn handler() {
+fn button_irq_handler() {
     critical_section::with(|cs| {
         // Очистка флага прерывания
         BUTTON
@@ -30,6 +35,17 @@ fn handler() {
 
         // Установка флага
         BTN_PRESSED.borrow(cs).set(true);
+    });
+}
+
+#[handler]
+fn gpt_irq_handler() {
+    critical_section::with(|cs| {
+        // Очистка флага прерывания
+        TIMER.borrow_ref_mut(cs).as_mut().unwrap().clear_interrupt();
+
+        // Установка флага
+        PERIOD_ELAPSED.borrow(cs).set(true);
     });
 }
 
@@ -44,10 +60,12 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
+    info!("Running at {:?} MHz", CpuClock::max());
+
     let mut io = Io::new(peripherals.IO_MUX);
 
     // Установка обработчика прерываний
-    io.set_interrupt_handler(handler);
+    io.set_interrupt_handler(button_irq_handler);
     io.set_interrupt_priority(esp_hal::interrupt::Priority::Priority1);
 
     let mut led = Output::new(peripherals.GPIO7, Level::Low, OutputConfig::default());
@@ -61,6 +79,19 @@ fn main() -> ! {
     button.listen(Event::FallingEdge);
     critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
 
+    // Инициализация таймера
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    let mut periodic_timer = PeriodicTimer::new(timg0.timer0);
+
+    periodic_timer.set_interrupt_handler(gpt_irq_handler);
+    periodic_timer.listen();
+
+    // Запуск таймера
+    if let Err(e) = periodic_timer.start(esp_hal::time::Duration::from_millis(1000)) {
+        error!("Failed to start timer: {:?}", e);
+    }
+    critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(periodic_timer));
+
     let mut count = 0;
 
     info!("Main thread has started...");
@@ -69,7 +100,12 @@ fn main() -> ! {
             if BTN_PRESSED.borrow(cs).get() {
                 BTN_PRESSED.borrow(cs).set(false);
                 count += 1;
-                warn!("Button pressed {} times", count);
+                warn!("The button has been pressed {} times", count);
+            }
+
+            if PERIOD_ELAPSED.borrow(cs).get() {
+                PERIOD_ELAPSED.borrow(cs).set(false);
+                warn!("timg0.timer0 period elapsed!");
                 led.toggle();
             }
         });
