@@ -66,9 +66,9 @@ fn main() -> ! {
     let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
 
     if let Err(e) = lstimer0.configure(timer::config::Config {
-        duty: timer::config::Duty::Duty12Bit,
+        duty: timer::config::Duty::Duty5Bit,
         clock_source: timer::LSClockSource::APBClk,
-        frequency: Rate::from_khz(1),
+        frequency: Rate::from_khz(24),
     }) {
         error!("Failed to configure timer: {:?}", e);
     };
@@ -78,15 +78,12 @@ fn main() -> ! {
 
     if let Err(e) = channel0.configure(channel::config::Config {
         timer: &lstimer0,
-        duty_pct: 25,
+        duty_pct: 10,
         drive_mode: DriveMode::PushPull,
     }) {
         error!("Failed to configure channel: {:?}", e);
     }
 
-    // F = 1kHz, T = 1ms, Tp = 0.5ms (duty = 50%)
-    // F = 1kHz, T = 1ms, Tp = 0.25ms (duty = 25%)
-    // F = 4kHz, T = 125us, Tp = 250us (duty = 50%)
     let mut button = Input::new(
         peripherals.GPIO9,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
@@ -98,21 +95,16 @@ fn main() -> ! {
 
     let mut btn_pressed_cnt = 0;
 
-    let delay = esp_hal::delay::Delay::new();
-
     info!("Main thread has started...");
 
     loop {
         //frequency * duration / ((1<<bit_count) * abs(start-end)) < 1024
-        // for duty_value in 0..=100 {
-        //     channel0.set_duty(duty_value).unwrap();
-        //     delay.delay_millis(10u32);
-        // }
-
-        // for duty_value in (0..=100).rev() {
-        //     channel0.set_duty(duty_value).unwrap();
-        //     delay.delay_millis(10u32);
-        // }
+        if let Ok(_) = channel0.start_duty_fade(0, 100, 1000) {
+            while channel0.is_duty_fade_running() {}
+        }
+        if let Ok(_) = channel0.start_duty_fade(100, 0, 1000) {
+            while channel0.is_duty_fade_running() {}
+        }
 
         critical_section::with(|cs| {
             if BTN_PRESSED.borrow(cs).get() {
