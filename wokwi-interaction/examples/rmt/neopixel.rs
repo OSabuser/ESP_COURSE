@@ -19,7 +19,6 @@ use esp_hal::time::Rate;
 use esp_hal::{handler, main};
 use esp_hal_smartled::{SmartLedsAdapter, smart_led_buffer};
 use log::{info, warn};
-use smart_leds::RGB;
 use smart_leds::{
     RGB8, SmartLedsWrite, brightness, gamma,
     hsv::{Hsv, hsv2rgb},
@@ -85,17 +84,36 @@ fn main() -> ! {
 
     let mut smart_led = SmartLedsAdapter::new(rmt_channel, peripherals.GPIO2, &mut rmt_buffer);
 
-    let data: RGB8 = RGB8::new(0, 0xFF, 0);
-    let brigntness_level = 0x50;
-    smart_led
-        .write(brightness(gamma([data].into_iter()), brigntness_level))
-        .unwrap();
+    let delay = Delay::new();
+
+    let mut color = Hsv {
+        hue: 0,   // Цветовой тон
+        sat: 255, // Насыщенность
+        val: 255, // Значение
+    };
+    let mut data: RGB8;
+    let level = 10;
 
     let mut btn_pressed_cnt = 0;
 
     info!("Main thread has started...");
 
     loop {
+        // Iterate over the rainbow!
+        for hue in 0..=255 {
+            color.hue = hue;
+            // Convert from the HSV color space (where we can easily transition from one
+            // color to the other) to the RGB color space that we can then send to the LED
+            data = hsv2rgb(color);
+            // When sending to the LED, we do a gamma correction first (see smart_leds docs
+            // for details <https://docs.rs/smart-leds/latest/smart_leds/struct.Gamma.html>)
+            // and then limit the brightness level to 10 out of 255 so that the output
+            // is not too bright.
+            smart_led
+                .write(brightness(gamma([data].into_iter()), level))
+                .unwrap();
+            delay.delay_millis(20);
+        }
         critical_section::with(|cs| {
             if BTN_PRESSED.borrow(cs).get() {
                 BTN_PRESSED.borrow(cs).set(false);

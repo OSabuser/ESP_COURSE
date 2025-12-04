@@ -76,17 +76,17 @@ fn main() -> ! {
     // Создание канала и привязка к конкретному пину GPIO
     let mut channel0 = ledc.channel(channel::Number::Channel0, led);
 
-    // F = 1kHz, T = 1ms, Tp = 0.5ms (duty = 50%)
-    // F = 1kHz, T = 1ms, Tp = 0.25ms (duty = 25%)
-    // F = 4kHz, T = 125us, Tp = 250us (duty = 50%)
     if let Err(e) = channel0.configure(channel::config::Config {
         timer: &lstimer0,
-        duty_pct: 10,
+        duty_pct: 25,
         drive_mode: DriveMode::PushPull,
     }) {
         error!("Failed to configure channel: {:?}", e);
     }
 
+    // F = 1kHz, T = 1ms, Tp = 0.5ms (duty = 50%)
+    // F = 1kHz, T = 1ms, Tp = 0.25ms (duty = 25%)
+    // F = 4kHz, T = 125us, Tp = 250us (duty = 50%)
     let mut button = Input::new(
         peripherals.GPIO9,
         InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
@@ -104,15 +104,15 @@ fn main() -> ! {
 
     loop {
         //frequency * duration / ((1<<bit_count) * abs(start-end)) < 1024
-        for duty_value in 0..=100 {
-            channel0.set_duty(duty_value).unwrap();
-            delay.delay_millis(10u32);
-        }
+        // for duty_value in 0..=100 {
+        //     channel0.set_duty(duty_value).unwrap();
+        //     delay.delay_millis(10u32);
+        // }
 
-        for duty_value in (0..=100).rev() {
-            channel0.set_duty(duty_value).unwrap();
-            delay.delay_millis(10u32);
-        }
+        // for duty_value in (0..=100).rev() {
+        //     channel0.set_duty(duty_value).unwrap();
+        //     delay.delay_millis(10u32);
+        // }
 
         critical_section::with(|cs| {
             if BTN_PRESSED.borrow(cs).get() {

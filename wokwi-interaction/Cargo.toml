@@ -22,8 +22,8 @@ esp-backtrace = { version = "0.18.1", features = [
   "println",
 ] }
 esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
-
-
+esp-hal-smartled = { version = "0.17.0", features = ["esp32c3"] }
+smart-leds = "0.4.0"
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
