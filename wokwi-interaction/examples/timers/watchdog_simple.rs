@@ -16,15 +16,11 @@ use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 use esp_hal::time::Duration;
 use esp_hal::timer::PeriodicTimer;
 use esp_hal::timer::timg::{MwdtStage, TimerGroup};
-use esp_hal::uart::{AtCmdConfig, Config, DataBits, RxConfig, Uart, UartInterrupt, UartRx, UartTx};
 use esp_hal::{Blocking, handler, main};
 use log::{error, info, warn};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
-static UART: Mutex<RefCell<Option<Uart<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
-
-static MSG_RECEIVED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 
@@ -51,30 +47,6 @@ fn gpt_irq_handler() {
 
         // Установка флага
         PERIOD_ELAPSED.borrow(cs).set(true);
-    });
-}
-
-#[handler]
-fn uart_rx_irq_handler() {
-    critical_section::with(|cs| {
-        // Очистка флага прерывания
-        let mut serial = UART.borrow_ref_mut(cs);
-
-        if let Some(serial) = serial.as_mut() {
-            let mut buf = [0u8; 64];
-            if let Ok(cnt) = serial.read_buffered(&mut buf) {
-                error!("Read {} bytes", cnt);
-            }
-            let pending_interrupts = serial.interrupts();
-            warn!(
-                "Interrupt AT-CMD: {} RX-FIFO-FULL: {}",
-                pending_interrupts.contains(UartInterrupt::AtCmd),
-                pending_interrupts.contains(UartInterrupt::RxFifoFull),
-            );
-            serial.clear_interrupts(UartInterrupt::AtCmd | UartInterrupt::RxFifoFull);
-        }
-        // Установка флага
-        MSG_RECEIVED.borrow(cs).set(true);
     });
 }
 
@@ -125,33 +97,11 @@ fn main() -> ! {
     }
     critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(periodic_timer));
 
-    // Инициализация UART1 [UART0 занят ESP-IDF]
-    // При превышении fifo_full_threshold будет вызываться прерывание RxFifoFull
-    let config = Config::default().with_rx(RxConfig::default().with_fifo_full_threshold(32));
-    let mut serial_instance = Uart::new(
-        peripherals.UART1,
-        config.with_baudrate(9600).with_data_bits(DataBits::_8),
-    )
-    .unwrap()
-    .with_rx(peripherals.GPIO20)
-    .with_tx(peripherals.GPIO21);
-
-    serial_instance.set_interrupt_handler(uart_rx_irq_handler);
-    critical_section::with(|cs| {
-        serial_instance.set_at_cmd(AtCmdConfig::default().with_cmd_char(b'#'));
-        serial_instance.listen(UartInterrupt::RxFifoFull | UartInterrupt::AtCmd);
-        UART.borrow_ref_mut(cs).replace(serial_instance)
-    });
-
     let mut count = 0;
 
     info!("Main thread has started...");
     loop {
         critical_section::with(|cs| {
-            if MSG_RECEIVED.borrow(cs).get() {
-                MSG_RECEIVED.borrow(cs).set(false);
-                error!("Message received!");
-            }
             if BTN_PRESSED.borrow(cs).get() {
                 BTN_PRESSED.borrow(cs).set(false);
                 count += 1;
