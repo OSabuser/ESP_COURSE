@@ -14,48 +14,16 @@ use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 
 use esp_hal::time::Duration;
-use esp_hal::timer::Timer;
 use esp_hal::timer::timg::Timer as TimgTimer;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{handler, main};
-use log::{info, warn};
+use esp_hal::timer::{Error, OneShotTimer, Timer};
+use esp_hal::{Blocking, handler, main};
+use log::{error, info, warn};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<TimgTimer>>> = Mutex::new(RefCell::new(None));
 static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
-
-struct CurrentTime {
-    hours: u64,
-    minutes: u64,
-    seconds: u64,
-}
-
-impl Default for CurrentTime {
-    fn default() -> Self {
-        Self {
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-        }
-    }
-}
-
-impl CurrentTime {
-    fn set_time(&mut self, duration: Duration) {
-        if duration.as_hours() >= 24 {
-            self.hours = 0;
-            self.minutes = 0;
-            self.seconds = 0;
-
-            return;
-        }
-
-        self.hours = duration.as_hours() % 24;
-        self.minutes = duration.as_minutes() % 60;
-        self.seconds = duration.as_secs() % 60;
-    }
-}
 
 #[handler]
 fn button_irq_handler() {
@@ -116,45 +84,49 @@ fn main() -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: TimgTimer = timg0.timer0;
 
-    timer0.load_value(Duration::from_secs(1)).unwrap();
+    timer0.load_value(Duration::from_millis(1000)).unwrap();
     timer0.set_interrupt_handler(timer0_irq_handler);
     timer0.enable_interrupt(true);
-    timer0.enable_auto_reload(true);
-
+    timer0.enable_auto_reload(false);
+    let mut now = timer0.now();
     timer0.start();
-
     critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(timer0));
 
-    let mut btn_pressed_cnt = 0;
-    let mut system_time = CurrentTime::default();
-    let mut initial_second_cnt: u64 = 0;
+    let mut count = 0;
+
+    let timings = [900, 800, 700, 600, 500, 400];
+    let mut timing_cnt = 0;
+
+    let mut previous_time = 0;
+
     info!("Main thread has started...");
 
     loop {
         critical_section::with(|cs| {
             if BTN_PRESSED.borrow(cs).get() {
                 BTN_PRESSED.borrow(cs).set(false);
-                btn_pressed_cnt += 1;
-                warn!("The button has been pressed {} times", btn_pressed_cnt);
-
-                if btn_pressed_cnt % 2 == 0 {
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().start();
-                } else {
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().stop();
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().reset();
-                }
+                count += 1;
+                warn!("The button has been pressed {} times", count);
             }
 
             if PERIOD_ELAPSED.borrow(cs).get() {
                 PERIOD_ELAPSED.borrow(cs).set(false);
 
-                initial_second_cnt = initial_second_cnt.wrapping_add(1);
-                system_time.set_time(Duration::from_secs(initial_second_cnt));
+                // Вычисление времени между прерываниями
+                let current_time = now.elapsed().as_millis();
+                warn!("Time {} ms has elapsed", current_time - previous_time);
+                previous_time = current_time;
 
-                info!(
-                    "Current time: {:0>2}:{:0>2}:{:0>2}",
-                    system_time.hours, system_time.minutes, system_time.seconds
-                );
+                // Загрузка нового значения переполнения
+                TIMER
+                    .borrow_ref_mut(cs)
+                    .as_mut()
+                    .unwrap()
+                    .load_value(Duration::from_millis(timings[timing_cnt]))
+                    .unwrap();
+                TIMER.borrow_ref_mut(cs).as_mut().unwrap().start();
+
+                timing_cnt = (timing_cnt + 1) % timings.len();
 
                 led.toggle();
             }

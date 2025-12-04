@@ -43,14 +43,6 @@ impl Default for CurrentTime {
 
 impl CurrentTime {
     fn set_time(&mut self, duration: Duration) {
-        if duration.as_hours() >= 24 {
-            self.hours = 0;
-            self.minutes = 0;
-            self.seconds = 0;
-
-            return;
-        }
-
         self.hours = duration.as_hours() % 24;
         self.minutes = duration.as_minutes() % 60;
         self.seconds = duration.as_secs() % 60;
@@ -120,14 +112,13 @@ fn main() -> ! {
     timer0.set_interrupt_handler(timer0_irq_handler);
     timer0.enable_interrupt(true);
     timer0.enable_auto_reload(true);
-
     timer0.start();
-
+    let initial_time_stamp = timer0.now();
     critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(timer0));
 
     let mut btn_pressed_cnt = 0;
     let mut system_time = CurrentTime::default();
-    let mut initial_second_cnt: u64 = 0;
+
     info!("Main thread has started...");
 
     loop {
@@ -136,20 +127,14 @@ fn main() -> ! {
                 BTN_PRESSED.borrow(cs).set(false);
                 btn_pressed_cnt += 1;
                 warn!("The button has been pressed {} times", btn_pressed_cnt);
-
-                if btn_pressed_cnt % 2 == 0 {
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().start();
-                } else {
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().stop();
-                    TIMER.borrow_ref_mut(cs).as_mut().unwrap().reset();
-                }
             }
 
             if PERIOD_ELAPSED.borrow(cs).get() {
                 PERIOD_ELAPSED.borrow(cs).set(false);
 
-                initial_second_cnt = initial_second_cnt.wrapping_add(1);
-                system_time.set_time(Duration::from_secs(initial_second_cnt));
+                let duration = initial_time_stamp.elapsed();
+
+                system_time.set_time(duration);
 
                 info!(
                     "Current time: {:0>2}:{:0>2}:{:0>2}",
