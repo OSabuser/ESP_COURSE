@@ -16,15 +16,28 @@ use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 use esp_hal::time::Duration;
 use esp_hal::timer::PeriodicTimer;
 use esp_hal::timer::timg::{MwdtStage, TimerGroup};
-use esp_hal::uart::{AtCmdConfig, Config, DataBits, RxConfig, Uart, UartInterrupt, UartRx, UartTx};
+use esp_hal::uart::{Config, DataBits, RxConfig, Uart, UartInterrupt};
 use esp_hal::{Blocking, handler, main};
 use log::{error, info, warn};
 
+struct MessageBuffer {
+    message: [u8; 64],
+    length: usize,
+}
+impl MessageBuffer {
+    fn new() -> Self {
+        Self {
+            message: [0; 64],
+            length: 0,
+        }
+    }
+}
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
 static UART: Mutex<RefCell<Option<Uart<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
 
 static MSG_RECEIVED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
+static MSG_BUFFER: Mutex<RefCell<Option<MessageBuffer>>> = Mutex::new(RefCell::new(None));
 static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
 
@@ -63,18 +76,17 @@ fn uart_rx_irq_handler() {
         if let Some(serial) = serial.as_mut() {
             let mut buf = [0u8; 64];
             if let Ok(cnt) = serial.read_buffered(&mut buf) {
-                error!("Read {} bytes", cnt);
+                let mut buffer = MSG_BUFFER.borrow_ref_mut(cs);
+                buffer.as_mut().unwrap().length = cnt;
+                for i in 0..cnt {
+                    buffer.as_mut().unwrap().message[i] = buf[i];
+                }
+                // Установка флага
+                MSG_RECEIVED.borrow(cs).set(true);
             }
-            let pending_interrupts = serial.interrupts();
-            warn!(
-                "Interrupt AT-CMD: {} RX-FIFO-FULL: {}",
-                pending_interrupts.contains(UartInterrupt::AtCmd),
-                pending_interrupts.contains(UartInterrupt::RxFifoFull),
-            );
-            serial.clear_interrupts(UartInterrupt::AtCmd | UartInterrupt::RxFifoFull);
+
+            serial.clear_interrupts(UartInterrupt::RxTimeout | UartInterrupt::RxFifoFull);
         }
-        // Установка флага
-        MSG_RECEIVED.borrow(cs).set(true);
     });
 }
 
@@ -126,8 +138,12 @@ fn main() -> ! {
     critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(periodic_timer));
 
     // Инициализация UART1 [UART0 занят ESP-IDF]
-    // При превышении fifo_full_threshold будет вызываться прерывание RxFifoFull
-    let config = Config::default().with_rx(RxConfig::default().with_fifo_full_threshold(32));
+    // При превышении
+    let config = Config::default().with_rx(
+        RxConfig::default()
+            .with_fifo_full_threshold(64)
+            .with_timeout(10),
+    );
     let mut serial_instance = Uart::new(
         peripherals.UART1,
         config.with_baudrate(9600).with_data_bits(DataBits::_8),
@@ -137,10 +153,13 @@ fn main() -> ! {
     .with_tx(peripherals.GPIO21);
 
     serial_instance.set_interrupt_handler(uart_rx_irq_handler);
+
+    let msg_instance = MessageBuffer::new();
+
     critical_section::with(|cs| {
-        serial_instance.set_at_cmd(AtCmdConfig::default().with_cmd_char(b'#'));
-        serial_instance.listen(UartInterrupt::RxFifoFull | UartInterrupt::AtCmd);
-        UART.borrow_ref_mut(cs).replace(serial_instance)
+        serial_instance.listen(UartInterrupt::RxTimeout | UartInterrupt::RxFifoFull);
+        UART.borrow_ref_mut(cs).replace(serial_instance);
+        MSG_BUFFER.borrow_ref_mut(cs).replace(msg_instance);
     });
 
     let mut count = 0;
@@ -150,7 +169,13 @@ fn main() -> ! {
         critical_section::with(|cs| {
             if MSG_RECEIVED.borrow(cs).get() {
                 MSG_RECEIVED.borrow(cs).set(false);
-                error!("Message received!");
+                let buffer = MSG_BUFFER.borrow_ref_mut(cs);
+                info!(
+                    "Received message: {:?}",
+                    core::str::from_utf8(
+                        &buffer.as_ref().unwrap().message[0..buffer.as_ref().unwrap().length]
+                    )
+                );
             }
             if BTN_PRESSED.borrow(cs).get() {
                 BTN_PRESSED.borrow(cs).set(false);
@@ -160,9 +185,10 @@ fn main() -> ! {
 
             if PERIOD_ELAPSED.borrow(cs).get() {
                 PERIOD_ELAPSED.borrow(cs).set(false);
-                warn!("timg0.timer0 period elapsed!");
+                warn!("Periodic Timer period elapsed!");
                 led.toggle();
                 wdt_timer.feed();
+                info!("Watchdog feeded");
             }
         });
     }
