@@ -20,13 +20,13 @@ use esp_hal::delay::Delay;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 
 use esp_hal::i2c::master::I2c;
+use esp_hal::riscv::asm::delay;
 use esp_hal::time::Duration;
 use esp_hal::timer::PeriodicTimer;
 use esp_hal::timer::timg::{MwdtStage, TimerGroup};
-use esp_hal::{Blocking, handler, main};
+use esp_hal::{Blocking, delay, handler, main};
 use esp_hal::{i2c::master::Config, time::Rate};
 use log::{error, info, warn};
-use shtcx::{self, LowPower, PowerMode};
 
 static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
@@ -77,40 +77,31 @@ fn main() -> ! {
     // Инициализация I2C
     let config = Config::default().with_frequency(Rate::from_khz(400));
 
-    let mut delay = Delay::new();
-
-    let i2c = I2c::new(peripherals.I2C0, config)
+    let mut i2c = I2c::new(peripherals.I2C0, config)
         .unwrap()
         .with_sda(peripherals.GPIO10)
         .with_scl(peripherals.GPIO8);
 
-    let mut sht = shtcx::shtc3(i2c);
+    let mut read_buffer = [0u8; 2];
 
-    sht.wakeup(&mut delay).expect("Wakeup failed");
+    let delay = Delay::new();
 
-    warn!(
-        "Device identifier: 0x{:02x}",
-        sht.device_identifier()
-            .expect("Failed to get device identifier")
-    );
+    info!("[1] Putting the SHTC3 to sleep");
+    i2c.write(SHTC_ADDR, &[0xB0, 0x98]).unwrap();
 
-    warn!(
-        "Raw ID register:   0b{:016b}",
-        sht.raw_id_register()
-            .expect("Failed to get raw ID register")
-    );
+    info!("[2] Waking up the SHTC3");
+    i2c.write(SHTC_ADDR, &[0x35, 0x17]).unwrap();
 
-    warn!("Normal mode measurements:");
-    for _ in 0..3 {
-        let measurement = sht
-            .measure(PowerMode::NormalMode, &mut delay)
-            .expect("Normal mode measurement failed");
-        warn!(
-            "  {:.2} °C | {:.2} %RH",
-            measurement.temperature.as_degrees_celsius(),
-            measurement.humidity.as_percent(),
-        );
-    }
+    delay.delay_millis(100);
+
+    info!("[3] Reading the SHTC3 ID");
+    i2c.write(SHTC_ADDR, &[0xEF, 0xC8]).unwrap();
+    i2c.read(SHTC_ADDR, &mut read_buffer).unwrap();
+
+    let id =
+        (((((read_buffer[0] >> 3) & 0x01) as u16) << 8) >> 2) | ((read_buffer[1] & 0x3F) as u16);
+
+    error!("[4] SHTC3 ID: {:#04x}", id);
 
     let mut io = Io::new(peripherals.IO_MUX);
 
