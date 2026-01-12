@@ -67,50 +67,19 @@ esp_bootloader_esp_idf::esp_app_desc!();
 fn main() -> ! {
     // generator version: 1.0.1
 
-    esp_println::logger::init_logger_from_env();
+    // esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(log::LevelFilter::Trace);
+
+    log::error!("this is error message");
+    log::warn!("this is warn message");
+    log::info!("this is info message");
+    log::debug!("this is debug message");
+    log::trace!("this is trace message");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
     info!("Running at {:?} MHz", CpuClock::max());
-
-    // Инициализация I2C
-    let config = Config::default().with_frequency(Rate::from_khz(400));
-
-    let mut delay = Delay::new();
-
-    let i2c = I2c::new(peripherals.I2C0, config)
-        .unwrap()
-        .with_sda(peripherals.GPIO10)
-        .with_scl(peripherals.GPIO8);
-
-    let mut sht = shtcx::shtc3(i2c);
-
-    sht.wakeup(&mut delay).expect("Wakeup failed");
-
-    warn!(
-        "Device identifier: 0x{:02x}",
-        sht.device_identifier()
-            .expect("Failed to get device identifier")
-    );
-
-    warn!(
-        "Raw ID register:   0b{:016b}",
-        sht.raw_id_register()
-            .expect("Failed to get raw ID register")
-    );
-
-    warn!("Normal mode measurements:");
-    for _ in 0..3 {
-        let measurement = sht
-            .measure(PowerMode::NormalMode, &mut delay)
-            .expect("Normal mode measurement failed");
-        warn!(
-            "  {:.2} °C | {:.2} %RH",
-            measurement.temperature.as_degrees_celsius(),
-            measurement.humidity.as_percent(),
-        );
-    }
 
     let mut io = Io::new(peripherals.IO_MUX);
 
