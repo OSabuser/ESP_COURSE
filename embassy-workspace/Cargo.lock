@@ -289,6 +289,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "heapless",
+ "log",
 ]
 
 [[package]]
@@ -353,6 +354,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-executor",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "esp-bootloader-esp-idf",
  "esp-hal",
