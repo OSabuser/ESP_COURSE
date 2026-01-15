@@ -6,60 +6,17 @@
     holding buffers for the duration of a data transfer."
 )]
 
-/// Работа с датчиком температуры и влажности SHT3C
-/// I2C: Standard (100kHz) - Fast-mode Plus (400kHz)
-/// I2C address: 0x70
-/// ESP SCL:IO8
-/// ESP SDA:IO10
-use core::cell::{Cell, RefCell};
 use esp_backtrace as _;
 
-use critical_section::Mutex;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
-use esp_hal::gpio::{Event, Input, InputConfig, Io, Level, Output, OutputConfig};
 
-use esp_hal::i2c::master::I2c;
+use esp_hal::main;
 use esp_hal::time::Duration;
-use esp_hal::timer::PeriodicTimer;
+
 use esp_hal::timer::timg::{MwdtStage, TimerGroup};
-use esp_hal::{Blocking, handler, main};
-use esp_hal::{i2c::master::Config, time::Rate};
+
 use log::{error, info, warn};
-use shtcx::{self, LowPower, PowerMode};
-
-static BUTTON: Mutex<RefCell<Option<Input>>> = Mutex::new(RefCell::new(None));
-static TIMER: Mutex<RefCell<Option<PeriodicTimer<'_, Blocking>>>> = Mutex::new(RefCell::new(None));
-
-static PERIOD_ELAPSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
-static BTN_PRESSED: Mutex<Cell<bool>> = Mutex::new(Cell::new(false));
-
-const SHTC_ADDR: u8 = 0x70;
-#[handler]
-fn button_irq_handler() {
-    critical_section::with(|cs| {
-        // Очистка флага прерывания
-        BUTTON
-            .borrow_ref_mut(cs)
-            .as_mut()
-            .unwrap()
-            .clear_interrupt();
-
-        // Установка флага
-        BTN_PRESSED.borrow(cs).set(true);
-    });
-}
-
-#[handler]
-fn gpt_irq_handler() {
-    critical_section::with(|cs| {
-        // Очистка флага прерывания
-        TIMER.borrow_ref_mut(cs).as_mut().unwrap().clear_interrupt();
-
-        // Установка флага
-        PERIOD_ELAPSED.borrow(cs).set(true);
-    });
-}
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -70,45 +27,13 @@ fn main() -> ! {
     // esp_println::logger::init_logger_from_env();
     esp_println::logger::init_logger(log::LevelFilter::Trace);
 
-    log::error!("this is error message");
-    log::warn!("this is warn message");
-    log::info!("this is info message");
-    log::debug!("this is debug message");
-    log::trace!("this is trace message");
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
     info!("Running at {:?} MHz", CpuClock::max());
 
-    let mut io = Io::new(peripherals.IO_MUX);
-
-    // Установка обработчика прерываний
-    io.set_interrupt_handler(button_irq_handler);
-    io.set_interrupt_priority(esp_hal::interrupt::Priority::Priority1);
-
-    let mut led = Output::new(peripherals.GPIO7, Level::Low, OutputConfig::default());
-
-    let mut button = Input::new(
-        peripherals.GPIO9,
-        InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
-    );
-
-    // Запуск обработки прерываний, передача handle button в глобальный контекст BUTTON для работы в другом потоке выполнения
-    button.listen(Event::FallingEdge);
-    critical_section::with(|cs| BUTTON.borrow_ref_mut(cs).replace(button));
-
     // Инициализация таймера
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let mut periodic_timer = PeriodicTimer::new(timg0.timer0);
-    periodic_timer.set_interrupt_handler(gpt_irq_handler);
-    periodic_timer.listen();
-
-    // Запуск таймера
-    if let Err(e) = periodic_timer.start(esp_hal::time::Duration::from_millis(1000)) {
-        error!("Failed to start timer: {:?}", e);
-    }
-    critical_section::with(|cs| TIMER.borrow_ref_mut(cs).replace(periodic_timer));
 
     // Запуск Watchdog
     let mut wdt_timer = timg0.wdt;
@@ -116,22 +41,11 @@ fn main() -> ! {
     wdt_timer.enable();
 
     info!("Main thread has started...");
-    let mut count = 0;
-    loop {
-        critical_section::with(|cs| {
-            if BTN_PRESSED.borrow(cs).get() {
-                BTN_PRESSED.borrow(cs).set(false);
-                count += 1;
-                warn!("The button has been pressed {} times", count);
-            }
 
-            if PERIOD_ELAPSED.borrow(cs).get() {
-                PERIOD_ELAPSED.borrow(cs).set(false);
-                warn!("Periodic Timer period elapsed!");
-                led.toggle();
-                wdt_timer.feed();
-                info!("Watchdog feeded");
-            }
-        });
+    let delay = Delay::new();
+
+    loop {
+        wdt_timer.feed();
+        delay.delay_millis(1000);
     }
 }

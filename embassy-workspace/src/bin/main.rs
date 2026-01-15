@@ -7,23 +7,30 @@
 )]
 
 use embassy_executor::Spawner;
+
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
+use esp_hal::Async;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{AnyPin, Input, InputConfig, Output};
-
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{rmt::Rmt, time::Rate};
+use esp_hal_smartled::SmartLedsAdapterAsync;
 use log::{error, info, warn};
+use rgb::{Grb, Rgb};
+use smart_leds::{
+    RGB8, SmartLedsWriteAsync, brightness, gamma,
+    hsv::{Hsv, hsv2rgb},
+};
+
+use esp_hal::gpio::{AnyPin, Input, InputConfig, Output};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-type ButtonType = Mutex<CriticalSectionRawMutex, Option<Input<'static>>>;
-static BUTTON: ButtonType = Mutex::new(None);
+esp_bootloader_esp_idf::esp_app_desc!();
 
 enum ButtonState {
     Pressed,
@@ -35,9 +42,6 @@ struct UserButton {
     state: ButtonState,
 }
 
-esp_bootloader_esp_idf::esp_app_desc!();
-
-// Размер очереди: 2, 2 подписчика и 1 продюсер
 static BUTTON_PRESSED: Signal<CriticalSectionRawMutex, ButtonState> = Signal::new();
 
 #[esp_rtos::main]
@@ -48,6 +52,11 @@ async fn main(spawner: Spawner) -> ! {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
+    let sk_din_pin = AnyPin::from(peripherals.GPIO21);
+    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80))
+        .expect("Failed to initialize RMT0")
+        .into_async();
 
     let user_btn = UserButton {
         input: Input::new(
@@ -60,12 +69,39 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
+    spawner.spawn(heartbeat_task(rmt, sk_din_pin)).unwrap();
     spawner.spawn(button_read_task(user_btn)).unwrap();
     spawner.spawn(menu_task()).unwrap();
 
     loop {
         error!("Message sent from main");
         Timer::after(Duration::from_millis(1500)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn heartbeat_task(rmt_instance: Rmt<'static, Async>, pin: AnyPin<'static>) {
+    let rmt_channel = rmt_instance.channel0;
+
+    let mut rmt_buffer =
+        [esp_hal::rmt::PulseCode::default(); esp_hal_smartled::buffer_size_async(1)];
+
+    let mut led = SmartLedsAdapterAsync::new(rmt_channel, pin, &mut rmt_buffer);
+
+    let mut data: RGB8 = Rgb::new(0, 255, 0);
+    let level = 10;
+
+    loop {
+        data.g = 255;
+        led.write(brightness(gamma([data].into_iter()), level))
+            .await
+            .unwrap();
+        Timer::after(Duration::from_millis(50)).await;
+        data.g = 0;
+        led.write(brightness(gamma([data].into_iter()), level))
+            .await
+            .unwrap();
+        Timer::after(Duration::from_millis(1250)).await;
     }
 }
 
