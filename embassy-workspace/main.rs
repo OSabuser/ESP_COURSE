@@ -42,7 +42,9 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+/// Display width
 const DISPLAY_SIZE_WIDTH: u16 = 240;
+/// Display height
 const DISPLAY_SIZE_HEIGHT: u16 = 135;
 
 const DISPLAY_BUFFER_SIZE: usize = DISPLAY_SIZE_WIDTH as usize * DISPLAY_SIZE_HEIGHT as usize * 2; // sizeof(Rgb565)*W*H
@@ -59,7 +61,7 @@ async fn main(spawner: Spawner) -> ! {
     // Initialize SPI
     let spi_bus = Spi::new(
         peripherals.SPI2,
-        esp_hal::spi::master::Config::default().with_frequency(esp_hal::time::Rate::from_mhz(80)),
+        esp_hal::spi::master::Config::default().with_frequency(esp_hal::time::Rate::from_mhz(26)),
     )
     .unwrap()
     .with_sck(peripherals.GPIO36)
@@ -97,8 +99,8 @@ async fn main(spawner: Spawner) -> ! {
 
     let mut display = Builder::new(ST7789, di)
         .invert_colors(ColorInversion::Inverted)
-        .display_size(DISPLAY_SIZE_HEIGHT, DISPLAY_SIZE_WIDTH)
-        .display_offset(52, 40)
+        .display_size(DISPLAY_SIZE_WIDTH, DISPLAY_SIZE_HEIGHT)
+        .display_offset(0, 100)
         .reset_pin(display_rst)
         .init(&mut Delay::new())
         .expect("Unable to initialize display!");
@@ -117,13 +119,16 @@ async fn main(spawner: Spawner) -> ! {
 
     delay.delay_millis(1500);
     display_bl.set_high();
-    delay.delay_millis(5);
-    display
-        .fill_solid(
-            &Rectangle::new(Point::new(25, 25), Size::new(50, 100)),
-            Rgb565::WHITE,
-        )
-        .unwrap();
+    delay.delay_millis(1500);
+    display.fill_solid(
+        &Rectangle::new(
+            Point::new(52, 40), // Центрируйте в 240x320
+            Size::new(135, 240),
+        ),
+        Rgb565::WHITE,
+    );
+
+    delay.delay_millis(1500);
 
     spawner.spawn(heartbeat_task()).unwrap();
 
