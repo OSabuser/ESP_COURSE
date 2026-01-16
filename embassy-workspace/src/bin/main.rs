@@ -8,22 +8,31 @@
 
 use embassy_executor::Spawner;
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
-use esp_hal::Async;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::clock::CpuClock;
+use esp_hal::delay;
+use esp_hal::delay::Delay;
+use esp_hal::gpio::Output;
+use esp_hal::gpio::OutputConfig;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{rmt::Rmt, time::Rate};
-use esp_hal_smartled::SmartLedsAdapterAsync;
 use log::{error, info, warn};
-use rgb::{Grb, Rgb};
-use smart_leds::{
-    RGB8, SmartLedsWriteAsync, brightness, gamma,
-    hsv::{Hsv, hsv2rgb},
+
+use esp_hal::spi::master::Spi;
+
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::*,
+    primitives::{Circle, Primitive, PrimitiveStyle, Triangle},
 };
 
-use esp_hal::gpio::{AnyPin, Input, InputConfig, Output};
+// Provides the Display builder
+use mipidsi::{
+    Builder,
+    interface::SpiInterface,
+    models::ST7789,
+    options::{ColorInversion, Orientation},
+};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -32,101 +41,96 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-enum ButtonState {
-    Pressed,
-    Released,
-}
+/// Display width
+const DISPLAY_SIZE_WIDTH: u16 = 240;
+/// Display height
+const DISPLAY_SIZE_HEIGHT: u16 = 135;
 
-struct UserButton {
-    input: Input<'static>,
-    state: ButtonState,
-}
-
-static BUTTON_PRESSED: Signal<CriticalSectionRawMutex, ButtonState> = Signal::new();
+const DISPLAY_BUFFER_SIZE: usize = DISPLAY_SIZE_WIDTH as usize * DISPLAY_SIZE_HEIGHT as usize * 2;
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
-    // generator version: 1.0.1
-
-    esp_println::logger::init_logger_from_env();
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    esp_println::logger::init_logger_from_env();
     let peripherals = esp_hal::init(config);
-
-    let sk_din_pin = AnyPin::from(peripherals.GPIO21);
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80))
-        .expect("Failed to initialize RMT0")
-        .into_async();
-
-    let user_btn = UserButton {
-        input: Input::new(
-            peripherals.GPIO0,
-            InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
-        ),
-        state: ButtonState::Released,
-    };
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    spawner.spawn(heartbeat_task(rmt, sk_din_pin)).unwrap();
-    spawner.spawn(button_read_task(user_btn)).unwrap();
-    spawner.spawn(menu_task()).unwrap();
+    let display_cs = Output::new(
+        peripherals.GPIO37,
+        esp_hal::gpio::Level::Low,
+        OutputConfig::default(),
+    );
+
+    // Initialize SPI
+    let spi_bus = Spi::new(
+        peripherals.SPI2,
+        esp_hal::spi::master::Config::default().with_frequency(esp_hal::time::Rate::from_mhz(60)),
+    )
+    .unwrap()
+    .with_sck(peripherals.GPIO36)
+    .with_mosi(peripherals.GPIO35);
+
+    //display_rst.set_high();
+
+    let spi_dev = ExclusiveDevice::new(spi_bus, display_cs, Delay::new()).unwrap();
+
+    let display_rs = Output::new(
+        peripherals.GPIO34,
+        esp_hal::gpio::Level::Low,
+        OutputConfig::default(),
+    );
+    let display_rst = Output::new(
+        peripherals.GPIO33,
+        esp_hal::gpio::Level::High,
+        OutputConfig::default(),
+    );
+    let mut display_bl = Output::new(
+        peripherals.GPIO38,
+        esp_hal::gpio::Level::Low,
+        OutputConfig::default(),
+    );
+
+    let mut framebuffer = [0_u8; DISPLAY_BUFFER_SIZE];
+
+    // Define the display interface with no chip select
+    let di = SpiInterface::new(spi_dev, display_rs, &mut framebuffer);
+
+    let mut display = Builder::new(ST7789, di)
+        .invert_colors(mipidsi::options::ColorInversion::Inverted)
+        .display_size(DISPLAY_SIZE_HEIGHT, DISPLAY_SIZE_WIDTH)
+        .display_offset(40, 53)
+        .reset_pin(display_rst)
+        .init(&mut Delay::new())
+        .expect("Unable to initialize display!");
+
+    display
+        .set_orientation(Orientation::new().rotate(mipidsi::options::Rotation::Deg90))
+        .expect("Unable to set orientation!");
+
+    display
+        .set_vertical_scroll_offset(0)
+        .expect("Unable to set vertical offset!");
+
+    // Make the display all black
+    display.clear(Rgb565::BLACK).unwrap();
+    let delay = Delay::new();
+    delay.delay_millis(1500);
+    display_bl.set_high();
+
+    spawner.spawn(heartbeat_task()).unwrap();
 
     loop {
-        error!("Message sent from main");
+        info!("Message sent from main");
         Timer::after(Duration::from_millis(1500)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn heartbeat_task(rmt_instance: Rmt<'static, Async>, pin: AnyPin<'static>) {
-    let rmt_channel = rmt_instance.channel0;
-
-    let mut rmt_buffer =
-        [esp_hal::rmt::PulseCode::default(); esp_hal_smartled::buffer_size_async(1)];
-
-    let mut led = SmartLedsAdapterAsync::new(rmt_channel, pin, &mut rmt_buffer);
-
-    let mut data: RGB8 = Rgb::new(0, 255, 0);
-    let level = 10;
-
+async fn heartbeat_task() {
     loop {
-        data.g = 255;
-        led.write(brightness(gamma([data].into_iter()), level))
-            .await
-            .unwrap();
-        Timer::after(Duration::from_millis(50)).await;
-        data.g = 0;
-        led.write(brightness(gamma([data].into_iter()), level))
-            .await
-            .unwrap();
+        info!("We are alive");
         Timer::after(Duration::from_millis(1250)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn button_read_task(mut button: UserButton) {
-    loop {
-        button.input.wait_for_falling_edge().await;
-        button.state = ButtonState::Pressed;
-        BUTTON_PRESSED.signal(button.state);
-        Timer::after(Duration::from_millis(250)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn menu_task() {
-    loop {
-        let command = BUTTON_PRESSED.wait().await;
-
-        match command {
-            ButtonState::Pressed => {
-                warn!("Button has been pressed!");
-            }
-            _ => {
-                warn!("Not implemented!");
-            }
-        }
     }
 }
