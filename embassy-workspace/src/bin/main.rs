@@ -6,18 +6,24 @@
     holding buffers for the duration of a data transfer."
 )]
 
+use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
-
 use embassy_time::{Duration, Timer};
 use embedded_graphics::primitives::Rectangle;
-use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::clock::CpuClock;
-use esp_hal::delay;
-use esp_hal::delay::Delay;
+
 use esp_hal::gpio::Output;
 use esp_hal::gpio::OutputConfig;
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info, warn};
+
+// This crate's framebuffer and async display interface
+use lcd_async::{
+    Builder, interface,
+    models::ST7789,
+    options::{ColorInversion, Orientation, Rotation},
+    raw_framebuf::RawFrameBuf,
+};
 
 use esp_hal::spi::master::Spi;
 
@@ -26,14 +32,7 @@ use embedded_graphics::{
     prelude::*,
     primitives::{Circle, Primitive, PrimitiveStyle, Triangle},
 };
-
-// Provides the Display builder
-use mipidsi::{
-    Builder,
-    interface::SpiInterface,
-    models::ST7789,
-    options::{ColorInversion, Orientation},
-};
+use static_cell::StaticCell;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -42,10 +41,13 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const DISPLAY_SIZE_WIDTH: u16 = 240;
-const DISPLAY_SIZE_HEIGHT: u16 = 135;
+// Display parameters
+const WIDTH: u16 = 240;
+const HEIGHT: u16 = 135;
+const PIXEL_SIZE: usize = 2; // RGB565 = 2 bytes per pixel
+const FRAME_SIZE: usize = (WIDTH as usize) * (HEIGHT as usize) * PIXEL_SIZE;
 
-const DISPLAY_BUFFER_SIZE: usize = DISPLAY_SIZE_WIDTH as usize * DISPLAY_SIZE_HEIGHT as usize * 2; // sizeof(Rgb565)*W*H
+static FRAME_BUFFER: StaticCell<[u8; FRAME_SIZE]> = StaticCell::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -56,74 +58,104 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
+    // Create DMA buffers for SPI
+    #[allow(clippy::manual_div_ceil)]
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = esp_hal::dma_buffers!(4, 32_000);
+    let dma_rx_buf = esp_hal::dma::DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+    let dma_tx_buf = esp_hal::dma::DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+
+    let sclk = peripherals.GPIO36; // SCK
+    let mosi = peripherals.GPIO35; // MOSI
+    let res = peripherals.GPIO33; // RES (Reset)
+    let dc = peripherals.GPIO34; // DC (Data/Command)
+    let cs = peripherals.GPIO37; // CS (Chip Select)
+
     // Initialize SPI
-    let spi_bus = Spi::new(
+    // Create SPI with DMA
+    let spi = Spi::new(
         peripherals.SPI2,
-        esp_hal::spi::master::Config::default().with_frequency(esp_hal::time::Rate::from_mhz(80)),
+        esp_hal::spi::master::Config::default()
+            .with_frequency(esp_hal::time::Rate::from_mhz(60))
+            .with_mode(esp_hal::spi::Mode::_0),
     )
     .unwrap()
-    .with_sck(peripherals.GPIO36)
-    .with_mosi(peripherals.GPIO35);
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_dma(peripherals.DMA_CH0)
+    .with_buffers(dma_rx_buf, dma_tx_buf)
+    .into_async();
 
-    let display_cs = Output::new(
-        peripherals.GPIO37,
-        esp_hal::gpio::Level::Low,
-        OutputConfig::default(),
-    );
-    //
-
-    let spi_dev = ExclusiveDevice::new(spi_bus, display_cs, Delay::new()).unwrap();
-
-    let display_rs = Output::new(
-        peripherals.GPIO34,
-        esp_hal::gpio::Level::Low,
-        OutputConfig::default(),
-    );
-    let display_rst = Output::new(
-        peripherals.GPIO33,
-        esp_hal::gpio::Level::High,
-        OutputConfig::default(),
-    );
     let mut display_bl = Output::new(
         peripherals.GPIO38,
         esp_hal::gpio::Level::Low,
         OutputConfig::default(),
     );
 
-    let mut framebuffer = [0_u8; DISPLAY_BUFFER_SIZE];
+    // Create control pins
+    let res = Output::new(res, esp_hal::gpio::Level::Low, Default::default());
+    let dc = Output::new(dc, esp_hal::gpio::Level::Low, Default::default());
+    let cs = Output::new(cs, esp_hal::gpio::Level::High, Default::default());
 
-    // Define the display interface with no chip select
-    let di = SpiInterface::new(spi_dev, display_rs, &mut framebuffer);
+    // Create shared SPI bus
+    static SPI_BUS: StaticCell<
+        embassy_sync::mutex::Mutex<
+            embassy_sync::blocking_mutex::raw::NoopRawMutex,
+            esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>,
+        >,
+    > = StaticCell::new();
+    let spi_bus = embassy_sync::mutex::Mutex::new(spi);
+    let spi_bus = SPI_BUS.init(spi_bus);
+    let spi_device = SpiDevice::new(spi_bus, cs);
 
+    // Create display interface
+    let di = interface::SpiInterface::new(spi_device, dc);
+    let mut delay = embassy_time::Delay;
+
+    // Initialize the display
     let mut display = Builder::new(ST7789, di)
-        .invert_colors(ColorInversion::Inverted)
-        .display_size(DISPLAY_SIZE_HEIGHT, DISPLAY_SIZE_WIDTH)
+        .reset_pin(res)
+        .display_size(HEIGHT, WIDTH)
+        .orientation(Orientation {
+            rotation: Rotation::Deg90,
+            mirrored: false,
+        })
         .display_offset(52, 40)
-        .reset_pin(display_rst)
-        .init(&mut Delay::new())
-        .expect("Unable to initialize display!");
-
-    display
-        .set_orientation(Orientation::new().rotate(mipidsi::options::Rotation::Deg0))
-        .expect("Unable to set orientation!");
-
-    display
-        .set_vertical_scroll_offset(0)
-        .expect("Unable to set vertical offset!");
-
-    let delay = Delay::new();
-    // Make the display all black
-    display.clear(Rgb565::BLACK).unwrap();
-
-    delay.delay_millis(1500);
-    display_bl.set_high();
-    delay.delay_millis(5);
-    display
-        .fill_solid(
-            &Rectangle::new(Point::new(25, 25), Size::new(50, 100)),
-            Rgb565::WHITE,
-        )
+        .invert_colors(ColorInversion::Inverted)
+        .init(&mut delay)
+        .await
         .unwrap();
+
+    // Initialize frame buffer
+    let frame_buffer = FRAME_BUFFER.init_with(|| [0; FRAME_SIZE]);
+
+    // Create a framebuffer for drawing
+    let mut raw_fb =
+        RawFrameBuf::<Rgb565, _>::new(frame_buffer.as_mut_slice(), WIDTH.into(), HEIGHT.into());
+
+    // Clear the framebuffer to black
+    raw_fb.clear(Rgb565::BLACK).unwrap();
+    // Create a new character style
+    let style = embedded_graphics::mono_font::MonoTextStyle::new(
+        &embedded_graphics::mono_font::ascii::FONT_10X20,
+        Rgb565::WHITE,
+    );
+
+    embedded_graphics::text::Text::new("Hello Rust!", Point::new(100, 50), style)
+        .draw(&mut raw_fb)
+        .unwrap();
+
+    Rectangle::new(Point::new(0, 0), Size::new(75, 100))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
+        .draw(&mut raw_fb)
+        .unwrap();
+
+    // Send the framebuffer data to the display
+    display
+        .show_raw_data(0, 0, WIDTH, HEIGHT, frame_buffer)
+        .await
+        .unwrap();
+
+    display_bl.set_high();
 
     spawner.spawn(heartbeat_task()).unwrap();
 
