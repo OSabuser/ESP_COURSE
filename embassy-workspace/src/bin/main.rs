@@ -8,12 +8,18 @@
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_executor::Spawner;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
-use embedded_graphics::primitives::Rectangle;
+use embedded_graphics::primitives::Circle;
 use esp_hal::clock::CpuClock;
 
-use esp_hal::gpio::Output;
-use esp_hal::gpio::OutputConfig;
+use esp_hal::Async;
+use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
+use esp_hal::gpio::{Input, Level, Output, OutputConfig};
+use esp_hal::spi::{
+    Mode,
+    master::{Config, Spi, SpiDmaBus},
+};
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info, warn};
 
@@ -25,13 +31,14 @@ use lcd_async::{
     raw_framebuf::RawFrameBuf,
 };
 
-use esp_hal::spi::master::Spi;
-
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::mutex::Mutex;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
-    primitives::{Circle, Primitive, PrimitiveStyle, Triangle},
+    primitives::{Primitive, PrimitiveStyle},
 };
+
 use static_cell::StaticCell;
 
 #[panic_handler]
@@ -39,15 +46,19 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+enum ButtonState {
+    Pressed,
+    Released,
+}
+
+struct UserButton {
+    input: Input<'static>,
+    state: ButtonState,
+}
+
+static BUTTON_PRESSED: Signal<CriticalSectionRawMutex, ButtonState> = Signal::new();
+
 esp_bootloader_esp_idf::esp_app_desc!();
-
-// Display parameters
-const WIDTH: u16 = 240;
-const HEIGHT: u16 = 135;
-const PIXEL_SIZE: usize = 2; // RGB565 = 2 bytes per pixel
-const FRAME_SIZE: usize = (WIDTH as usize) * (HEIGHT as usize) * PIXEL_SIZE;
-
-static FRAME_BUFFER: StaticCell<[u8; FRAME_SIZE]> = StaticCell::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -61,22 +72,19 @@ async fn main(spawner: Spawner) -> ! {
     // Create DMA buffers for SPI
     #[allow(clippy::manual_div_ceil)]
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = esp_hal::dma_buffers!(4, 32_000);
-    let dma_rx_buf = esp_hal::dma::DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
-    let dma_tx_buf = esp_hal::dma::DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
     let sclk = peripherals.GPIO36; // SCK
     let mosi = peripherals.GPIO35; // MOSI
-    let res = peripherals.GPIO33; // RES (Reset)
-    let dc = peripherals.GPIO34; // DC (Data/Command)
-    let cs = peripherals.GPIO37; // CS (Chip Select)
 
     // Initialize SPI
     // Create SPI with DMA
     let spi = Spi::new(
         peripherals.SPI2,
-        esp_hal::spi::master::Config::default()
+        Config::default()
             .with_frequency(esp_hal::time::Rate::from_mhz(60))
-            .with_mode(esp_hal::spi::Mode::_0),
+            .with_mode(Mode::_0),
     )
     .unwrap()
     .with_sck(sclk)
@@ -85,35 +93,111 @@ async fn main(spawner: Spawner) -> ! {
     .with_buffers(dma_rx_buf, dma_tx_buf)
     .into_async();
 
-    let mut display_bl = Output::new(
-        peripherals.GPIO38,
-        esp_hal::gpio::Level::Low,
-        OutputConfig::default(),
-    );
-
     // Create control pins
-    let res = Output::new(res, esp_hal::gpio::Level::Low, Default::default());
-    let dc = Output::new(dc, esp_hal::gpio::Level::Low, Default::default());
-    let cs = Output::new(cs, esp_hal::gpio::Level::High, Default::default());
+    let res = Output::new(peripherals.GPIO33, Level::Low, Default::default());
+    let dc = Output::new(peripherals.GPIO34, Level::Low, Default::default());
+    let cs = Output::new(peripherals.GPIO37, Level::High, Default::default());
+    let display_bl = Output::new(peripherals.GPIO38, Level::Low, OutputConfig::default());
 
     // Create shared SPI bus
-    static SPI_BUS: StaticCell<
-        embassy_sync::mutex::Mutex<
-            embassy_sync::blocking_mutex::raw::NoopRawMutex,
-            esp_hal::spi::master::SpiDmaBus<'static, esp_hal::Async>,
-        >,
-    > = StaticCell::new();
-    let spi_bus = embassy_sync::mutex::Mutex::new(spi);
+    static SPI_BUS: StaticCell<Mutex<NoopRawMutex, SpiDmaBus<'static, Async>>> = StaticCell::new();
+    let spi_bus = Mutex::new(spi);
     let spi_bus = SPI_BUS.init(spi_bus);
-    let spi_device = SpiDevice::new(spi_bus, cs);
+
+    let spi_device: SpiDevice<'static, NoopRawMutex, SpiDmaBus<'static, Async>, Output<'static>> =
+        SpiDevice::new(spi_bus, cs);
+
+    let user_btn = UserButton {
+        input: Input::new(
+            peripherals.GPIO0,
+            esp_hal::gpio::InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
+        ),
+        state: ButtonState::Released,
+    };
+
+    spawner.spawn(button_read_task(user_btn)).unwrap();
+    spawner.spawn(heartbeat_task()).unwrap();
+    spawner
+        .spawn(drawing_task(spi_device, dc, res, display_bl))
+        .unwrap();
+
+    loop {
+        let command = BUTTON_PRESSED.wait().await;
+
+        match command {
+            ButtonState::Pressed => {
+                error!("Button has been pressed!");
+            }
+            ButtonState::Released => {
+                error!("Button has been released!");
+            }
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn button_read_task(mut button: UserButton) {
+    loop {
+        button.input.wait_for_falling_edge().await;
+        button.state = ButtonState::Pressed;
+        BUTTON_PRESSED.signal(button.state);
+        button.input.wait_for_rising_edge().await;
+        button.state = ButtonState::Released;
+        BUTTON_PRESSED.signal(button.state);
+        Timer::after(Duration::from_millis(250)).await;
+    }
+}
+
+static HEARTBEAT_OCCURED: Signal<CriticalSectionRawMutex, HeartbeatState> = Signal::new();
+
+#[derive(Copy, Clone)]
+enum HeartbeatState {
+    On,
+    Off,
+}
+#[embassy_executor::task]
+async fn heartbeat_task() {
+    let mut state = HeartbeatState::Off;
+    loop {
+        info!("We are alive");
+        HEARTBEAT_OCCURED.signal(state.clone());
+        state = match state {
+            HeartbeatState::On => HeartbeatState::Off,
+            HeartbeatState::Off => HeartbeatState::On,
+        };
+        Timer::after(Duration::from_millis(2000)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn drawing_task(
+    spi_device: SpiDevice<'static, NoopRawMutex, SpiDmaBus<'static, Async>, Output<'static>>,
+    data_pin: Output<'static>,
+    reset_pin: Output<'static>,
+    mut backlight_pin: Output<'static>,
+) {
+    // Display parameters
+    const WIDTH: u16 = 240;
+    const HEIGHT: u16 = 135;
+    const PIXEL_SIZE: usize = 2; // RGB565 = 2 bytes per pixel
+    const FRAME_SIZE: usize = (WIDTH as usize) * (HEIGHT as usize) * PIXEL_SIZE;
+
+    static FRAME_BUFFER: StaticCell<[u8; FRAME_SIZE]> = StaticCell::new();
 
     // Create display interface
-    let di = interface::SpiInterface::new(spi_device, dc);
+    let di = interface::SpiInterface::new(spi_device, data_pin);
     let mut delay = embassy_time::Delay;
 
     // Initialize the display
-    let mut display = Builder::new(ST7789, di)
-        .reset_pin(res)
+    let mut oled_display: lcd_async::Display<
+        interface::SpiInterface<
+            SpiDevice<'_, NoopRawMutex, SpiDmaBus<'_, Async>, Output<'_>>,
+            Output<'_>,
+        >,
+        ST7789,
+        Output<'_>,
+    > = Builder::new(ST7789, di)
+        .reset_pin(reset_pin)
         .display_size(HEIGHT, WIDTH)
         .orientation(Orientation {
             rotation: Rotation::Deg90,
@@ -125,7 +209,7 @@ async fn main(spawner: Spawner) -> ! {
         .await
         .unwrap();
 
-    // Initialize frame buffer
+    // Initialize framebuffer
     let frame_buffer = FRAME_BUFFER.init_with(|| [0; FRAME_SIZE]);
 
     // Create a framebuffer for drawing
@@ -134,41 +218,52 @@ async fn main(spawner: Spawner) -> ! {
 
     // Clear the framebuffer to black
     raw_fb.clear(Rgb565::BLACK).unwrap();
+
+    // Turn on the backlight
+    backlight_pin.set_high();
+
     // Create a new character style
     let style = embedded_graphics::mono_font::MonoTextStyle::new(
         &embedded_graphics::mono_font::ascii::FONT_10X20,
         Rgb565::WHITE,
     );
 
-    embedded_graphics::text::Text::new("Hello Rust!", Point::new(100, 50), style)
+    embedded_graphics::text::Text::new("In an Async World!", Point::new(0, 125), style)
         .draw(&mut raw_fb)
         .unwrap();
-
-    Rectangle::new(Point::new(0, 0), Size::new(75, 100))
-        .into_styled(PrimitiveStyle::with_fill(Rgb565::GREEN))
-        .draw(&mut raw_fb)
-        .unwrap();
-
-    // Send the framebuffer data to the display
-    display
-        .show_raw_data(0, 0, WIDTH, HEIGHT, frame_buffer)
-        .await
-        .unwrap();
-
-    display_bl.set_high();
-
-    spawner.spawn(heartbeat_task()).unwrap();
 
     loop {
-        info!("Message sent from main");
-        Timer::after(Duration::from_millis(1500)).await;
+        let state = HEARTBEAT_OCCURED.wait().await;
+        // Create a framebuffer for drawing
+        let mut raw_fb =
+            RawFrameBuf::<Rgb565, _>::new(frame_buffer.as_mut_slice(), WIDTH.into(), HEIGHT.into());
+
+        // Toggle heartbeat
+        toggle_heartbeat(&mut raw_fb, state);
+
+        // Send the framebuffer data to the display
+        if let Err(e) = oled_display
+            .show_raw_data(0, 0, WIDTH, HEIGHT, frame_buffer)
+            .await
+        {
+            error!("Ошибка обновления фреймбуфера: {:?}", e);
+        }
+
+        warn!("Draaw!");
+        Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
-#[embassy_executor::task]
-async fn heartbeat_task() {
-    loop {
-        info!("We are alive");
-        Timer::after(Duration::from_millis(1250)).await;
+fn toggle_heartbeat(fb: &mut RawFrameBuf<Rgb565, &mut [u8]>, state: HeartbeatState) {
+    let color = match state {
+        HeartbeatState::On => Rgb565::GREEN,
+        HeartbeatState::Off => Rgb565::BLACK,
+    };
+
+    if let Err(e) = Circle::new(Point::new(210, 10), 20)
+        .into_styled(PrimitiveStyle::with_fill(color))
+        .draw(fb)
+    {
+        error!("Ошибка отрисовки: {:?}", e);
     }
 }
