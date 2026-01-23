@@ -7,6 +7,7 @@
 )]
 
 mod button;
+mod keyboard;
 mod manager;
 mod state_machine;
 
@@ -40,6 +41,19 @@ async fn main(spawner: Spawner) -> ! {
         esp_hal::gpio::InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
 
+    let mut keyboard = keyboard::Keyboard::new(
+        peripherals.GPIO8,
+        peripherals.GPIO9,
+        peripherals.GPIO11,
+        peripherals.GPIO13,
+        peripherals.GPIO15,
+        peripherals.GPIO3,
+        peripherals.GPIO4,
+        peripherals.GPIO5,
+        peripherals.GPIO6,
+        peripherals.GPIO7,
+    );
+
     // Button - Define and spawn async task
     let button_info = [(0_u8, button)];
 
@@ -55,6 +69,11 @@ async fn main(spawner: Spawner) -> ! {
     );
     warn!("Log level: {}", AppConfig::LOG_LEVEL);
 
+    // TODO: connect with manager
+    spawner
+        .spawn(keyboard::start_keyboard_scan(keyboard))
+        .expect("Failed to spawn keyboard scan task");
+
     // Task to check if all system components are ready to go
     spawner
         .spawn(manager::wait_for_system_ready())
@@ -68,6 +87,7 @@ async fn main(spawner: Spawner) -> ! {
         .expect("Failed spawning button_consumer");
 
     loop {
+        info!("=== ESP32 Config Demo ===");
         Timer::after(Duration::from_millis(10000)).await;
     }
 }

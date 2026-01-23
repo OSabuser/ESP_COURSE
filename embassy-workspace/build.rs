@@ -8,8 +8,8 @@ use std::path::Path;
 struct AppConfig {
     device_name: String,
     log_level: String,
-    long_press_threshold: u32,
-    long_hold_threshold: u32,
+    button_long_press_threshold: u32,
+    button_long_hold_threshold: u32,
 }
 
 fn main() -> Result<()> {
@@ -22,10 +22,10 @@ fn main() -> Result<()> {
     let out_path = Path::new(&out_dir);
 
     // Читаем конфиг из JSON файла
-    let config_path = Path::new("configs.json");
+    let config_path = Path::new("config.json");
 
     if !config_path.exists() {
-        println!("cargo:warning=configs.json not found, using defaults");
+        println!("cargo:warning=config.json not found, using defaults");
         write_default_configs(out_path)?;
         return Ok(());
     }
@@ -131,8 +131,8 @@ mod tests {{
 "#,
         config.device_name,
         config.log_level,
-        config.long_press_threshold,
-        config.long_hold_threshold,
+        config.button_long_press_threshold,
+        config.button_long_hold_threshold,
     );
 
     let config_file_path = out_path.join("config.rs");

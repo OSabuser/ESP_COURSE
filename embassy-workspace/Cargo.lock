@@ -15,6 +15,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "az"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be5eb007b7cacc6c660343e96f650fedf4b5a77512399eb952ca6642cf8d13f7"
+
+[[package]]
 name = "bitfield"
 version = "0.19.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -39,6 +45,16 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+
+[[package]]
+name = "bitmask-enum"
+version = "2.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6cbbb8f56245b5a479b30a62cdc86d26e2f35c2b9f594bc4671654b03851380"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "bytemuck"
@@ -362,10 +378,12 @@ name = "embassy-workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitmask-enum",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-graphics",
  "embedded-hal-bus",
  "embedded-sdmmc",
  "esp-bootloader-esp-idf",
@@ -373,9 +391,11 @@ dependencies = [
  "esp-println",
  "esp-rtos",
  "jiff",
+ "lcd-async",
  "log",
  "serde",
  "serde_json",
+ "static_cell",
 ]
 
 [[package]]
@@ -385,6 +405,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9d2e857f87ac832df68fa498d18ddc679175cf3d2e4aa893988e5601baf9438"
 dependencies = [
  "nb 1.1.0",
+]
+
+[[package]]
+name = "embedded-graphics"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0649998afacf6d575d126d83e68b78c0ab0e00ca2ac7e9b3db11b4cbe8274ef0"
+dependencies = [
+ "az",
+ "byteorder",
+ "embedded-graphics-core",
+ "float-cmp",
+ "micromath",
+]
+
+[[package]]
+name = "embedded-graphics-core"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba9ecd261f991856250d2207f6d8376946cd9f412a2165d3b75bc87a0bc7a044"
+dependencies = [
+ "az",
+ "byteorder",
 ]
 
 [[package]]
@@ -770,6 +813,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-cmp"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -937,6 +989,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68971ebff725b9e2ca27a601c5eb38a4c5d64422c4cbab0c535f248087eda5c2"
 
 [[package]]
+name = "lcd-async"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "362f088c5c176ceedd4d0e817d17ae3b79480495deac605158a7cd86450450c5"
+dependencies = [
+ "embedded-graphics",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+]
+
+[[package]]
 name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -953,6 +1017,12 @@ name = "memchr"
 version = "2.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
+
+[[package]]
+name = "micromath"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
 name = "nb"
@@ -1212,6 +1282,15 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "static_cell"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "strsim"

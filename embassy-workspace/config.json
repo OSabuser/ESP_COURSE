@@ -1,6 +1,6 @@
 {
   "device_name": "ESP32-Akimows",
   "log_level": "DEBUG",
-  "button_long_hold_threshold": "2000",
-  "button_long_press_threshold": "300"
+  "button_long_hold_threshold": 2500,
+  "button_long_press_threshold": 300
 }
