@@ -46,6 +46,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::unwrap_used)]
+#[allow(clippy::indexing_slicing)]
 fn linker_be_nice() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {

@@ -1,0 +1,13 @@
+# Максимальная сложность функции (для embedded - ниже обычного)
+cognitive-complexity-threshold = 20
+
+# Максимум аргументов функции
+too-many-arguments-threshold = 6
+
+# Разрешить unwrap в модуле tests
+allow-unwrap-in-tests = true
+
+# Разрешить expect в модуле tests
+allow-expect-in-tests = true
+
+msrv = "1.88"

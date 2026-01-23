@@ -6,6 +6,8 @@
     holding buffers for the duration of a data transfer."
 )]
 
+mod state_machine;
+
 use embassy_executor::Spawner;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Timer};
@@ -65,8 +67,15 @@ async fn main(spawner: Spawner) -> ! {
     warn!("LED PIN: {}", Config::LED_PIN);
     warn!("Log level: {}", Config::LOG_LEVEL);
 
-    spawner.spawn(button_read_task(user_btn)).unwrap();
-    spawner.spawn(heartbeat_task()).unwrap();
+    spawner
+        .spawn(button_read_task(user_btn))
+        .expect("Failed to spawn button task");
+    spawner
+        .spawn(heartbeat_task())
+        .expect("Failed to spawn heartbeat task");
+    spawner
+        .spawn(state_machine::state_machine_task())
+        .expect("Failed to spawn handle event task");
 
     loop {
         let command = BUTTON_PRESSED.wait().await;

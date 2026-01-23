@@ -8,6 +8,32 @@ version      = "0.1.0"
 name = "embassy-workspace"
 path = "./src/bin/main.rs"
 
+
+[lints.clippy]
+# Pedantic (очень полезен для embedded)
+pedantic = { level = "warn", priority = -1 }
+# Исключения из pedantic которые могут быть слишком строги
+missing_const_for_fn = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+single_call_fn = "allow"
+
+
+panic_in_result_fn = "deny"
+todo = "warn"
+unimplemented = "warn"
+unwrap_used = "deny"
+indexing_slicing = "deny"
+# No-std специфичные
+std_instead_of_core = "deny"
+std_instead_of_alloc = "deny"
+alloc_instead_of_core = "deny"
+# Безопасность при работе с памятью
+undocumented_unsafe_blocks = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+
+
 # Крейты, которые используются в процессе сборки проекта (становятся доступны в build.rs)
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
