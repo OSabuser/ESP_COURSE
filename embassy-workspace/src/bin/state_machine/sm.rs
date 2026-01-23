@@ -1,9 +1,12 @@
 #![allow(dead_code)] // only used for development
 #![allow(unused_variables)] // only used for development
 
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::pubsub::Subscriber;
 use embassy_time::{Duration, Instant, Timer};
 use log::{error, info, warn};
 
+use crate::button::{BUTTON_PUBSUB_CHANNEL, ButtonMessage, PressType};
 /// State machine possible states
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum State {
@@ -28,6 +31,12 @@ enum Event {
     Nothing,
     // Temporary state machine event (To be replaced later)
     SomethingElse,
+    /// Button press event is a short press
+    ButtonPressShortRelease,
+    /// Button press event is a long press
+    ButtonPressLongRelease,
+    /// Button press event is a long hold
+    ButtonPressLongHold,
     /// Error has occurred
     Error,
 }
@@ -37,14 +46,20 @@ struct StateMachine {
     current_state: State,
     /// Latest event: [`Event`]
     latest_event: Event,
+    /// Pub-sub subscriber: Listen for Button messages
+    button_pubsub_subscriber: Subscriber<'static, CriticalSectionRawMutex, ButtonMessage, 2, 3, 1>,
 }
 
 impl StateMachine {
     /// Constructor
     fn new(current_state: State, latest_event: Event) -> Self {
+        let button_pubsub_subscriber = BUTTON_PUBSUB_CHANNEL
+            .subscriber()
+            .expect("Failed to subscribe");
         StateMachine {
             current_state,
             latest_event,
+            button_pubsub_subscriber,
         }
     }
 
@@ -61,6 +76,26 @@ impl StateMachine {
             (State::Startup, Event::Ready) => {
                 info!("[State: Startup - Event: Ready] Startup -> Idle");
                 self.current_state = State::Idle;
+            }
+            (State::Idle, Event::ButtonPressShortRelease) => {
+                error!(
+                    "[State: Idle - Event: ButtonPressShortRelease] Button Press SHORT RELEASE: Idle -> Processing"
+                );
+                self.current_state = State::Processing;
+            }
+
+            (State::Idle, Event::ButtonPressLongRelease) => {
+                error!(
+                    "[State: Idle - Event: ButtonPressLongRelease] Button Press LONG RELEASE: Idle -> Processing"
+                );
+                self.current_state = State::Processing;
+            }
+
+            (State::Idle, Event::ButtonPressLongHold) => {
+                error!(
+                    "[State: Idle - Event: ButtonPressLongHold] Button Press LONG HOLD: Idle -> Processing"
+                );
+                self.current_state = State::Processing;
             }
 
             (State::Idle, Event::SomethingElse) => {
@@ -90,9 +125,23 @@ impl StateMachine {
 
     /// Get the current event - based on various conditions and inputs
     /// Return event to the state machine for determining the next state
-    async fn get_current_event(&mut self) -> Event {
+    fn get_current_event(&mut self) -> Event {
         // ++ Add event handling here (i.e. monitor button press) ++
-
+        // Check button press event
+        match self.button_pubsub_subscriber.try_next_message_pure() {
+            None => {} // No message available, do nothing
+            Some(button_message) => match button_message.press_type {
+                PressType::ShortRelease => {
+                    return Event::ButtonPressShortRelease;
+                }
+                PressType::LongRelease => {
+                    return Event::ButtonPressLongRelease;
+                }
+                PressType::LongHold => {
+                    return Event::ButtonPressLongHold;
+                }
+            },
+        }
         // No events occurred, return a nothing event
         Event::Nothing
     }
@@ -110,12 +159,17 @@ pub async fn state_machine_task() -> ! {
     info!("Running State Machine async task ...");
 
     let mut state_machine = StateMachine::new(State::Startup, Event::Nothing);
+
+    // Send a "PowerOn" event to state machine to handle
     state_machine.handle_event(Event::PowerOn).await;
+
+    // Send a "Ready" event to state machine to handle
+    state_machine.handle_event(Event::Ready).await;
 
     // Main infinite loop for the state machine
     loop {
         // Get the current event
-        let current_event = state_machine.get_current_event().await;
+        let current_event = state_machine.get_current_event();
 
         // Handle the event and update the state
         state_machine.handle_event(current_event).await;

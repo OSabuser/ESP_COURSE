@@ -10,15 +10,13 @@ mod button;
 mod state_machine;
 
 use embassy_executor::Spawner;
-use embassy_sync::signal::Signal;
+
 use embassy_time::{Duration, Timer};
 
 use esp_hal::clock::CpuClock;
 
 use esp_hal::timer::timg::TimerGroup;
-use log::{error, info, warn};
-
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use log::{info, warn};
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
@@ -47,12 +45,16 @@ async fn main(spawner: Spawner) -> ! {
     let button_info = [(0_u8, button)];
 
     warn!("=== ESP32 Config Demo ===");
-    warn!("Device: {}", Config::DEVICE_NAME);
-    warn!("Update interval: {}ms", Config::UPDATE_INTERVAL_MS);
-    warn!("Max retries: {}", Config::MAX_RETRIES);
-    warn!("WiFi SSID: {}", Config::WIFI_SSID);
-    warn!("LED PIN: {}", Config::LED_PIN);
-    warn!("Log level: {}", Config::LOG_LEVEL);
+    warn!("Device: {}", AppConfig::DEVICE_NAME);
+    warn!(
+        "Button's long press threshold: {}",
+        AppConfig::BTN_LONG_PRESS_THRESHOLD_MS
+    );
+    warn!(
+        "Button's long hold threshold: {}",
+        AppConfig::BTN_LONG_HOLD_THRESHOLD_MS
+    );
+    warn!("Log level: {}", AppConfig::LOG_LEVEL);
 
     spawner
         .spawn(state_machine::state_machine_task())
