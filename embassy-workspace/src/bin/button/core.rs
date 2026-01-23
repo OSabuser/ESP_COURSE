@@ -1,13 +1,13 @@
 //! Button module
 
+use super::messaging::{BUTTON_PUBSUB_CHANNEL, ButtonMessage, PressType};
 use crate::AppConfig;
-use crate::button::messaging::{BUTTON_PUBSUB_CHANNEL, ButtonMessage, PressType};
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::{Error, Publisher};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::gpio::Input;
-use log::{debug, error, info, warn};
+use log::{error, warn};
 
 // Custom type aliases
 type ItemId = u8;

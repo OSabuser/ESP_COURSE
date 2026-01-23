@@ -7,14 +7,13 @@
 )]
 
 mod button;
+mod manager;
 mod state_machine;
 
 use embassy_executor::Spawner;
-
 use embassy_time::{Duration, Timer};
 
 use esp_hal::clock::CpuClock;
-
 use esp_hal::timer::timg::TimerGroup;
 use log::{info, warn};
 
@@ -56,6 +55,11 @@ async fn main(spawner: Spawner) -> ! {
     );
     warn!("Log level: {}", AppConfig::LOG_LEVEL);
 
+    // Task to check if all system components are ready to go
+    spawner
+        .spawn(manager::wait_for_system_ready())
+        .expect("Failed to spawn wait_for_system_ready");
+
     spawner
         .spawn(state_machine::state_machine_task())
         .expect("Failed to spawn handle event task");
@@ -64,7 +68,6 @@ async fn main(spawner: Spawner) -> ! {
         .expect("Failed spawning button_consumer");
 
     loop {
-        info!("Main loop");
-        Timer::after(Duration::from_millis(1000)).await;
+        Timer::after(Duration::from_millis(10000)).await;
     }
 }

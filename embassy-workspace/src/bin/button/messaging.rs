@@ -4,6 +4,7 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex; // Ensure thread-safety across tasks
 use embassy_sync::pubsub::PubSubChannel;
+use embassy_sync::signal::Signal;
 use embassy_time::Instant;
 
 /// Button press type
@@ -35,3 +36,6 @@ pub struct ButtonMessage {
 /// 2 total capacity/messages, 3 subscribers, and 1 publisher
 pub static BUTTON_PUBSUB_CHANNEL: PubSubChannel<CriticalSectionRawMutex, ButtonMessage, 2, 3, 1> =
     PubSubChannel::new();
+
+/// A signal / flag that signals that the button system ready
+pub static BUTTON_READY_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();

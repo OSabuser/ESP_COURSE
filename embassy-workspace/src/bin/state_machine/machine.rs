@@ -1,12 +1,12 @@
 #![allow(dead_code)] // only used for development
 #![allow(unused_variables)] // only used for development
 
+use crate::button::{BUTTON_PUBSUB_CHANNEL, ButtonMessage, PressType};
+use crate::manager::SYSTEM_READY_PUBSUB_CHANNEL;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::pubsub::Subscriber;
 use embassy_time::{Duration, Instant, Timer};
 use log::{error, info, warn};
-
-use crate::button::{BUTTON_PUBSUB_CHANNEL, ButtonMessage, PressType};
 /// State machine possible states
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum State {
@@ -162,6 +162,12 @@ pub async fn state_machine_task() -> ! {
 
     // Send a "PowerOn" event to state machine to handle
     state_machine.handle_event(Event::PowerOn).await;
+
+    // Waiting on system to be ready to proceed
+    let mut system_ready_message = SYSTEM_READY_PUBSUB_CHANNEL
+        .subscriber()
+        .expect("State machine: Failed to subscribe to channel!");
+    system_ready_message.next_message_pure().await;
 
     // Send a "Ready" event to state machine to handle
     state_machine.handle_event(Event::Ready).await;

@@ -1,3 +1,3 @@
-mod sm;
+mod machine;
 
-pub use sm::state_machine_task;
+pub use machine::state_machine_task;
