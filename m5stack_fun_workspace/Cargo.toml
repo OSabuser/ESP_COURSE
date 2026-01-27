@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = [
+    "stam_plc_server",
+    "cardputer_client", "shared_lib",
+]
+
+
+[workspace.package]
+authors = ["Dmitry Akimov <von.akimov@gmail.com>"]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+
+[workspace.dependencies]
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+embassy-executor = { version = "0.9.1", features = ["defmt"] }
+embassy-time = { version = "0.5.0", features = ["defmt"] }
+embedded-io = { version = "0.7.1", features = ["defmt"] }
+embedded-io-async = { version = "0.7.0", features = ["defmt"] }
+esp-println = { version = "0.16.1", features = ["defmt-espflash", "esp32s3"] }
+esp-hal = { version = "1.0.0", features = ["defmt", "esp32s3", "unstable"] }
+esp-rtos = { version = "0.2.0", features = [
+  "defmt",
+  "embassy",
+  "esp-alloc",
+  "esp-radio",
+  "esp32s3",
+] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["defmt", "esp32s3"] }
+defmt                  = "1.0.1"

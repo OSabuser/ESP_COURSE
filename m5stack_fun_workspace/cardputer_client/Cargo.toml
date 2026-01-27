@@ -1,0 +1,53 @@
+[package]
+edition      = "2024"
+name         = "cardputer_client"
+rust-version = "1.88"
+version      = "0.1.0"
+
+[[bin]]
+name = "cardputer_client"
+path = "./src/bin/main.rs"
+
+[dependencies]
+critical-section = {workspace = true}
+static_cell = {workspace = true}
+embassy-executor = {workspace = true}
+embassy-time  = {workspace = true}
+embedded-io = {workspace = true}
+embedded-io-async = {workspace = true}
+esp-println = {workspace = true}
+esp-hal = {workspace = true}
+esp-rtos = {workspace = true}
+
+defmt                  = {workspace = true}
+esp-bootloader-esp-idf = {workspace = true}
+
+bt-hci = "0.6.0"
+
+esp-alloc = { version = "0.9.0", features = ["defmt"] }
+
+esp-radio = { version = "0.17.0", features = [
+  "ble",
+  "defmt",
+  "esp-alloc",
+  "esp32s3",
+  "unstable",
+] }
+trouble-host = { version = "0.5.0", features = ["gatt"] }
+
+
+
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units    = 1     # LLVM can perform better optimizations using a single thread
+debug            = 2
+debug-assertions = false
+incremental      = false
+lto              = 'fat'
+opt-level        = 's'
+overflow-checks  = false
