@@ -61,7 +61,7 @@ static_cell = "2.1.1"
 # To convert Spi bus to SpiDevice
 embedded-hal-bus = "0.3.0"
 bitmask-enum = "2.2.5"
-
+heapless = "0.9.2"
 ## For time parsing
 jiff = { version = "0.2.16", default-features = false, features = ["static"] }
 

@@ -41,7 +41,7 @@ async fn main(spawner: Spawner) -> ! {
         esp_hal::gpio::InputConfig::default().with_pull(esp_hal::gpio::Pull::Up),
     );
 
-    let mut keyboard = keyboard::Keyboard::new(
+    let keyboard = keyboard::Keyboard::new(
         peripherals.GPIO8,
         peripherals.GPIO9,
         peripherals.GPIO11,

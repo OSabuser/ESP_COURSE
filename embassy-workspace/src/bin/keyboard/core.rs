@@ -1,3 +1,4 @@
+/// From `ZacJW` <https://docs.rs/crate/cardputer-bsc-nostd/0.1.0/source/src/keyboard.rs>
 pub struct Keyboard<'a> {
     a0: esp_hal::gpio::Output<'a>,
     a1: esp_hal::gpio::Output<'a>,
@@ -140,7 +141,7 @@ impl<'a> Keyboard<'a> {
     }
 
     /// Returns the keys that were held when [scan][Self::scan] was last called.
-    pub fn held_keys(&self) -> Key {
+    pub fn _held_keys(&self) -> Key {
         self.last_state
     }
 
@@ -162,17 +163,17 @@ impl<'a> Keyboard<'a> {
 
     /// Returns buffered key releases that haven't already been cleared with
     /// [`clear_released_keys`][Self::clear_released_keys] or [`clear_some_released_keys`][Self::clear_some_released_keys]
-    pub fn released_keys(&self) -> Key {
+    pub fn _released_keys(&self) -> Key {
         self.released
     }
 
     /// Clears the key release buffer
-    pub fn clear_released_keys(&mut self) {
+    pub fn _clear_released_keys(&mut self) {
         self.released = Key::none();
     }
 
     /// Clears specific keys from the key release buffer
-    pub fn clear_some_released_keys(&mut self, keys_to_clear: Key) {
+    pub fn _clear_some_released_keys(&mut self, keys_to_clear: Key) {
         self.released &= !keys_to_clear;
     }
 }
