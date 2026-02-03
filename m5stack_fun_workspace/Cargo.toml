@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = [
-    "stam_plc_server",
     "cardputer_client", "shared_lib",
 ]
 

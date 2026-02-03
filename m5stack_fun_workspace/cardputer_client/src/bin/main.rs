@@ -14,17 +14,11 @@ use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 use esp_radio::ble::controller::BleConnector;
-use trouble_host::prelude::*;
 
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
-
-extern crate alloc;
-
-const CONNECTIONS_MAX: usize = 1;
-const L2CAP_CHANNELS_MAX: usize = 1;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -46,18 +40,19 @@ async fn main(spawner: Spawner) -> ! {
 
     let radio_init = esp_radio::init().expect("Failed to initialize Wi-Fi/BLE controller");
     // find more examples https://github.com/embassy-rs/trouble/tree/main/examples/esp32
-    let transport = BleConnector::new(&radio_init, peripherals.BT, Default::default()).unwrap();
+    let transport = BleConnector::new(&radio_init, peripherals.BT, Default::default())
+        .expect("Failed to initialize BLE transport");
+    // Инициализация HCI контроллера
     let ble_controller = ExternalController::<_, 20>::new(transport);
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
-        HostResources::new();
-    let _stack = trouble_host::new(ble_controller, &mut resources);
 
     // TODO: Spawn some tasks
     let _ = spawner;
 
+    // Запуск стэка BLE
+    cardputer_client::ble::run(ble_controller).await;
     loop {
-        info!("Hello from Cardputer!");
-        Timer::after(Duration::from_secs(1)).await;
+        info!("Hello from Cardputer-Client!");
+        Timer::after(Duration::from_secs(5)).await;
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0/examples/src/bin

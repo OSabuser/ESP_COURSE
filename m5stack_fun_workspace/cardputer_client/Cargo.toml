@@ -18,7 +18,9 @@ embedded-io-async = {workspace = true}
 esp-println = {workspace = true}
 esp-hal = {workspace = true}
 esp-rtos = {workspace = true}
-
+# Requires for gatt_server macro to work
+embassy-sync = { version = "0.7.2" }
+embassy-futures = "0.1.2"
 defmt                  = {workspace = true}
 esp-bootloader-esp-idf = {workspace = true}
 
@@ -33,7 +35,7 @@ esp-radio = { version = "0.17.0", features = [
   "esp32s3",
   "unstable",
 ] }
-trouble-host = { version = "0.5.0", features = ["gatt"] }
+trouble-host = { version = "0.5.0", features = ["gatt", "defmt", "derive"] }
 
 
 

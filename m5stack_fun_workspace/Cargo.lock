@@ -109,6 +109,8 @@ dependencies = [
  "critical-section",
  "defmt 1.0.1",
  "embassy-executor",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
@@ -1570,28 +1572,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "stam_plc_server"
-version = "0.1.0"
-dependencies = [
- "bt-hci",
- "critical-section",
- "defmt 1.0.1",
- "embassy-executor",
- "embassy-time",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "esp-alloc",
- "esp-bootloader-esp-idf",
- "esp-hal",
- "esp-println",
- "esp-radio",
- "esp-rtos",
- "shared_lib",
- "static_cell",
- "trouble-host",
-]
-
-[[package]]
 name = "static_cell"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1728,6 +1708,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2881b4859001fe1f48445145cda5149deac9110b1d707ec0a251b7ff6d8bdfa4"
 dependencies = [
  "bt-hci",
+ "defmt 1.0.1",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
